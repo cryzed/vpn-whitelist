@@ -48,14 +48,46 @@ def get_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("addresses", metavar="address", nargs="*")
-    parser.add_argument("--remove", "-r", action="store_true")
-    parser.add_argument("--file", "-f", dest="files", action="append", default=[])
-    parser.add_argument("--interface", "-i")
-    parser.add_argument("--ufw", "-u", action="store_true")
-    parser.add_argument("--gateway", "-g")
-    parser.add_argument("--table", "-t", default=DEFAULT_IP_ROUTE_TABLE)
-    parser.add_argument("--dry-run", "-d", action="store_true")
+    parser.add_argument(
+        "addresses",
+        metavar="address",
+        nargs="*",
+        help="Domains or IPs to be whitelisted",
+    )
+    parser.add_argument(
+        "--remove",
+        "-r",
+        action="store_true",
+        help="Remove the ip routes (and optionally UFW rules) instead",
+    )
+    parser.add_argument(
+        "--file",
+        "-f",
+        dest="files",
+        action="append",
+        default=[],
+        help="Load addresses from a file, repeatable",
+    )
+    parser.add_argument(
+        "--interface",
+        "-i",
+        help="Manually specify the network interface through which to route the traffic",
+    )
+    parser.add_argument(
+        "--gateway", "-g", help="Manually specify the network interface's gateway"
+    )
+    parser.add_argument(
+        "--ufw", "-u", action="store_true", help="Create UFW whitelist rules"
+    )
+    parser.add_argument(
+        "--table", "-t", default=DEFAULT_IP_ROUTE_TABLE, help="The target routing table"
+    )
+    parser.add_argument(
+        "--dry-run",
+        "-d",
+        action="store_true",
+        help="Do nothing, only print the changes to the network configuration",
+    )
     return parser
 
 
