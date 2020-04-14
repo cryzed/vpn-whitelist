@@ -174,7 +174,7 @@ def delete_ufw_rule(
 
 def read_address_file(path: str, encoding: str = ADDRESS_FILE_ENCODING) -> T.Set[str]:
     addresses = set()
-    with open(path, "r") as file:
+    with open(path, "r", encoding=encoding) as file:
         for line in file:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -211,8 +211,7 @@ def main(arguments: argparse.Namespace) -> ExitCode:
         try:
             addresses |= read_address_file(path)
         except FileNotFoundError:
-            stderr("File not found: {!r}", path)
-            return ExitCode.FileNotFound
+            stderr("File not found: {!r}, skipping", path)
 
     for address in sorted(addresses):
         try:
