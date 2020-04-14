@@ -182,20 +182,19 @@ stderr = functools.partial(print, file=sys.stderr)
 # noinspection PyShadowingNames
 def main(arguments: argparse.Namespace) -> ExitCode:
     gateway = arguments.gateway
-    interface = arguments.gateway
+    interface = arguments.interface
 
     if gateway is None or interface is None:
         default_route = get_default_route(arguments.table)
-        if default_route:
-            gateway = gateway or default_route.gateway
-            interface = interface or default_route.interface
+        if not default_route:
+            stderr(
+                "Could not determine default route, specify with -i/--interface and "
+                "-g/--gateway"
+            )
+            return ExitCode.UnknownDefaultRoute
 
-    if gateway is None or interface is None:
-        stderr(
-            "Could not determine default route, specify with -i/--interface and "
-            "-g/--gateway"
-        )
-        return ExitCode.UnknownDefaultRoute
+        gateway = gateway or default_route.gateway
+        interface = interface or default_route.interface
 
     addresses = set(arguments.addresses)
     for path in arguments.files:
