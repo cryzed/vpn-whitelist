@@ -63,7 +63,7 @@ def shell_escape(command: T.List[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
-def get_routing_table(table: str = DEFAULT_IP_ROUTE_TABLE,) -> T.List[Route]:
+def get_routing_table(table: str = DEFAULT_IP_ROUTE_TABLE) -> T.List[Route]:
     process = subprocess.run(
         ["ip", "route", "show", "table", table],
         stdout=subprocess.PIPE,
@@ -87,7 +87,7 @@ def get_routing_table(table: str = DEFAULT_IP_ROUTE_TABLE,) -> T.List[Route]:
     return table_list
 
 
-def get_default_route(table: str = DEFAULT_IP_ROUTE_TABLE,) -> T.Optional[Route]:
+def get_default_route(table: str = DEFAULT_IP_ROUTE_TABLE) -> T.Optional[Route]:
     for route in get_routing_table(table):
         if route.destination == "default":
             return route
