@@ -1,0 +1,45 @@
+#!/usr/bin/env python
+
+import argparse
+import enum
+import subprocess
+
+VPN_WHITELIST_ADDRESSES_FILE = "/etc/vpn-whitelist.conf"
+
+
+class InterfaceAction(enum.Enum):
+    Up = "up"
+    Down = "down"
+
+
+def get_argument_parser() -> argparse.ArgumentParser:
+    # noinspection PyShadowingNames
+    parser = argparse.ArgumentParser()
+    parser.add_argument("interface")
+    parser.add_argument("action", type=InterfaceAction)
+    return parser
+
+
+def vpn_whitelist(address_file: str, remove: bool = False) -> None:
+    command = ["vpn-whitelist", "--file", address_file, "--ufw"]
+    if remove:
+        command.append("--remove")
+
+    subprocess.run(command)
+
+
+# noinspection PyShadowingNames
+def main(arguments: argparse.Namespace) -> None:
+    if not arguments.interface.startswith(("tun", "tap")):
+        return
+
+    if arguments.action is InterfaceAction.Up:
+        vpn_whitelist(VPN_WHITELIST_ADDRESSES_FILE)
+    elif arguments.action is InterfaceAction.Down:
+        vpn_whitelist(VPN_WHITELIST_ADDRESSES_FILE, remove=True)
+
+
+if __name__ == "__main__":
+    parser = get_argument_parser()
+    arguments, rest = parser.parse_known_args()
+    main(arguments)

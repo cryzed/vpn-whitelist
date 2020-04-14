@@ -1,0 +1,247 @@
+#!/usr/bin/env python
+
+import argparse
+import dataclasses
+import enum
+import functools
+import re
+import shlex
+import socket
+import subprocess
+import sys
+import typing as T
+from datetime import datetime
+
+IP_ROUTE_REGEX = re.compile(
+    r"(?P<destination>.+?)(/(?P<mask>\d+))?\s+via\s+(?P<gateway>.+?)\s+dev\s+(?P<interface>.+?)\s|$"
+)
+DEFAULT_IP_ROUTE_TABLE = "main"
+ADDRESS_FILE_ENCODING = "UTF-8"
+
+IPRouteTableType = T.Union[str, int]
+
+
+@dataclasses.dataclass
+class Route:
+    destination: str
+    mask: int
+    gateway: str
+    interface: str
+
+
+class ExitCode(enum.IntEnum):
+    Success = 0
+    Failure = 1
+    FileNotFound = 2
+    UnknownDefaultRoute = 3
+
+
+class IPRouteAction(enum.Enum):
+    Add = "add"
+    Delete = "del"
+
+
+class UFWAction(enum.Enum):
+    Add = enum.auto()
+    Delete = "delete"
+
+
+def get_argument_parser() -> argparse.ArgumentParser():
+    # noinspection PyShadowingNames
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("addresses", metavar="address", nargs="*")
+    parser.add_argument("--remove", "-r", action="store_true")
+    parser.add_argument("--file", "-f", dest="files", action="append", default=[])
+    parser.add_argument("--interface", "-i")
+    parser.add_argument("--ufw", "-u", action="store_true")
+    parser.add_argument("--gateway", "-g")
+    parser.add_argument("--table", "-t", default=DEFAULT_IP_ROUTE_TABLE)
+    parser.add_argument("--dry-run", "-d", action="store_true")
+    return parser
+
+
+def shell_escape(command: T.List[T.Union[str, int]]) -> str:
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def get_routing_table(
+    table: IPRouteTableType = DEFAULT_IP_ROUTE_TABLE,
+) -> T.List[Route]:
+    process = subprocess.run(
+        ["ip", "route", "show", "table", table],
+        stdout=subprocess.PIPE,
+        universal_newlines=True,
+    )
+
+    table = []
+    for line in process.stdout.splitlines():
+        if not (match := IP_ROUTE_REGEX.match(line)):
+            continue
+
+        groups = match.groupdict()
+        route = Route(
+            groups["destination"],
+            32 if groups["mask"] is None else int(groups["mask"]),
+            groups["gateway"],
+            groups["interface"],
+        )
+        table.append(route)
+
+    return table
+
+
+def get_default_route(
+    table: IPRouteTableType = DEFAULT_IP_ROUTE_TABLE,
+) -> T.Optional[Route]:
+    for route in get_routing_table(table):
+        if route.destination == "default":
+            return route
+
+
+def get_ips(address: str) -> T.Set[str]:
+    return set(info[4][0] for info in socket.getaddrinfo(address, None))
+
+
+def ip_route(
+    action: IPRouteAction,
+    route: Route,
+    table: IPRouteTableType = DEFAULT_IP_ROUTE_TABLE,
+    dry_run: bool = False,
+) -> None:
+    command = [
+        "ip",
+        "route",
+        action.value,
+        f"{route.destination}/{route.mask}" if route.mask != 32 else route.destination,
+        "via",
+        route.gateway,
+        "dev",
+        route.interface,
+        "table",
+        table,
+    ]
+
+    print(shell_escape(command))
+    if not dry_run:
+        subprocess.run(command, stdout=subprocess.DEVNULL)
+
+
+def add_ip_route(
+    route: Route,
+    table: IPRouteTableType = DEFAULT_IP_ROUTE_TABLE,
+    dry_run: bool = False,
+) -> None:
+    ip_route(IPRouteAction.Add, route, table, dry_run)
+
+
+def delete_ip_route(
+    route: Route,
+    table: IPRouteTableType = DEFAULT_IP_ROUTE_TABLE,
+    dry_run: bool = False,
+) -> None:
+    ip_route(IPRouteAction.Delete, route, table, dry_run)
+
+
+def ufw_rule(
+    action: UFWAction,
+    route: Route,
+    comment: T.Optional[str] = None,
+    dry_run: bool = False,
+) -> None:
+    command = ["ufw", action.value] if action is UFWAction.Delete else ["ufw"]
+    command.extend(["allow", "out", "on", route.interface, "to", route.destination])
+    if comment is not None:
+        command.extend(["comment", comment])
+
+    print(shell_escape(command))
+    if not dry_run:
+        subprocess.run(command, stdout=subprocess.DEVNULL)
+
+
+def add_ufw_rule(
+    route: Route, comment: T.Optional[str] = None, dry_run: bool = False
+) -> None:
+    ufw_rule(UFWAction.Add, route, comment, dry_run)
+
+
+def delete_ufw_rule(
+    route: Route, comment: T.Optional[str] = None, dry_run: bool = False
+) -> None:
+    ufw_rule(UFWAction.Delete, route, comment, dry_run)
+
+
+def read_address_file(path: str, encoding: str = ADDRESS_FILE_ENCODING) -> T.Set[str]:
+    addresses = set()
+    with open(path, "r") as file:
+        for line in file:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            addresses.add(line)
+
+    return addresses
+
+
+stderr = functools.partial(print, file=sys.stderr)
+
+
+# noinspection PyShadowingNames
+def main(arguments: argparse.Namespace) -> ExitCode:
+    gateway = arguments.gateway
+    interface = arguments.gateway
+
+    if gateway is None or interface is None:
+        default_route = get_default_route(arguments.table)
+        if default_route:
+            gateway = gateway or default_route.gateway
+            interface = interface or default_route.interface
+
+    if gateway is None or interface is None:
+        stderr(
+            "Could not determine default route, specify with -i/--interface and "
+            "-g/--gateway"
+        )
+        return ExitCode.UnknownDefaultRoute
+
+    addresses = set(arguments.addresses)
+    for path in arguments.files:
+        try:
+            addresses |= read_address_file(path)
+        except FileNotFoundError:
+            stderr("File not found: {!r}", path)
+            return ExitCode.FileNotFound
+
+    for address in sorted(addresses):
+        try:
+            ips = get_ips(address)
+        except socket.gaierror as error:
+            stderr(f"{address}: {error}, skipping")
+            continue
+
+        stderr(f"{address}:")
+
+        for ip in ips:
+            route = Route(ip, 32, gateway, interface)
+            if arguments.remove:
+                delete_ip_route(route, arguments.table, arguments.dry_run)
+                if arguments.ufw:
+                    delete_ufw_rule(route, dry_run=arguments.dry_run)
+            else:
+                add_ip_route(route, arguments.table, arguments.dry_run)
+                if arguments.ufw:
+                    time_string = datetime.now().isoformat(" ", "seconds")
+                    comment = f"Whitelist {address} ({time_string})"
+                    add_ufw_rule(route, comment, arguments.dry_run)
+
+        stderr()
+
+    return ExitCode.Success
+
+
+if __name__ == "__main__":
+    parser = get_argument_parser()
+    arguments = parser.parse_args()
+    parser.exit(main(arguments))
