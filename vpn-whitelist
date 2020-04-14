@@ -230,7 +230,7 @@ def main(arguments: argparse.Namespace) -> ExitCode:
             else:
                 add_ip_route(route, arguments.table, arguments.dry_run)
                 if arguments.ufw:
-                    time_string = datetime.now().isoformat(" ", "seconds")
+                    time_string = datetime.now().isoformat(sep=" ", timespec="seconds")
                     comment = f"Whitelist {address} ({time_string})"
                     add_ufw_rule(route, comment, arguments.dry_run)
 

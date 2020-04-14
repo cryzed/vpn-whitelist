@@ -7,7 +7,7 @@ backup=('etc/vpn-whitelist.conf')
 source=('vpn-whitelist'
         'vpn-whitelist.conf'
         'vpn-whitelist.NetworkManager-dispatcher')
-md5sums=('6e84c87439d1bbaa82f45850914ef47f'
+md5sums=('c8ea971cf052184ca52c58ef7c76f2eb'
          'ccdcba5f71fed613675a23a6c458d343'
          'be3c9a68a228795f0868f60ef744d061')
 
