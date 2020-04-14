@@ -32,8 +32,7 @@ class Route:
 class ExitCode(enum.IntEnum):
     Success = 0
     Failure = 1
-    FileNotFound = 2
-    UnknownDefaultRoute = 3
+    UnknownDefaultRoute = 2
 
 
 class IPRouteAction(enum.Enum):
