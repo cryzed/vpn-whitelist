@@ -4,7 +4,7 @@ import argparse
 import enum
 import subprocess
 
-VPN_WHITELIST_ADDRESSES_FILE = "/etc/vpn-whitelist.conf"
+VPN_WHITELIST_ADDRESS_FILE = "/etc/vpn-whitelist.conf"
 
 
 class InterfaceAction(enum.Enum):
@@ -34,9 +34,9 @@ def main(arguments: argparse.Namespace) -> None:
         return
 
     if arguments.action is InterfaceAction.Up:
-        vpn_whitelist(VPN_WHITELIST_ADDRESSES_FILE)
+        vpn_whitelist(VPN_WHITELIST_ADDRESS_FILE)
     elif arguments.action is InterfaceAction.Down:
-        vpn_whitelist(VPN_WHITELIST_ADDRESSES_FILE, remove=True)
+        vpn_whitelist(VPN_WHITELIST_ADDRESS_FILE, remove=True)
 
 
 if __name__ == "__main__":
