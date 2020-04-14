@@ -3,7 +3,8 @@ pkgver=1.0.0
 pkgrel=1
 arch=('any')
 depends=('python')
-optdepends=('networkmanager: support for automatic whitelisting of addresses')
+optdepends=('networkmanager: support for automatic whitelisting of addresses'
+            'ufw: support for whitelisting addresses in UFW')
 backup=('etc/vpn-whitelist.conf')
 source=('vpn-whitelist'
         'vpn-whitelist.conf'
