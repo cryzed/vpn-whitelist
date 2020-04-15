@@ -244,7 +244,7 @@ def main(arguments: argparse.Namespace) -> ExitCode:
 
         stderr(f"{address}:")
 
-        for ip in ips:
+        for ip in sorted(ips):
             route = Route(ip, 32, gateway, interface)
             if arguments.remove:
                 delete_ip_route(route, arguments.table, arguments.dry_run)
