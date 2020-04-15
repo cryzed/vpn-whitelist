@@ -27,6 +27,32 @@ class Route:
     interface: str
 
 
+class AddressOption(enum.Enum):
+    Permanent = "permanent"
+
+
+@functools.total_ordering
+@dataclasses.dataclass
+class Address:
+    name: str
+    options: T.Set[AddressOption] = dataclasses.field(default_factory=set)
+
+    def __str__(self) -> str:
+        return self.name
+
+    def __lt__(self, other: T.Union["Address", str]) -> bool:
+        return str(self) < str(other)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, (str, Address)):
+            return NotImplemented
+
+        return str(self) == str(other)
+
+    def __hash__(self) -> int:
+        return hash(self.name)
+
+
 class ExitCode(enum.IntEnum):
     Success = 0
     Failure = 1
@@ -195,7 +221,20 @@ def delete_ufw_rule(
     ufw_rule(UFWAction.Delete, route, comment, dry_run)
 
 
-def read_address_file(path: str, encoding: str = ADDRESS_FILE_ENCODING) -> T.Set[str]:
+def parse_address_line(line: str) -> Address:
+    line = line.strip()
+
+    parts = line.split(None, 1)
+    if len(parts) == 1:
+        return Address(line)
+
+    options = set(AddressOption(option.strip()) for option in parts[1].split(","))
+    return Address(parts[0], options)
+
+
+def read_address_file(
+    path: str, encoding: str = ADDRESS_FILE_ENCODING
+) -> T.Set[Address]:
     addresses = set()
     with open(path, "r", encoding=encoding) as file:
         for line in file:
@@ -203,7 +242,8 @@ def read_address_file(path: str, encoding: str = ADDRESS_FILE_ENCODING) -> T.Set
             if not line or line.startswith("#"):
                 continue
 
-            addresses.add(line)
+            address = parse_address_line(line)
+            addresses.add(address)
 
     return addresses
 
@@ -228,7 +268,7 @@ def main(arguments: argparse.Namespace) -> ExitCode:
         gateway = gateway or default_route.gateway
         interface = interface or default_route.interface
 
-    addresses = set(arguments.addresses)
+    addresses = set(parse_address_line(address) for address in arguments.addresses)
     for path in arguments.files:
         try:
             addresses |= read_address_file(path)
@@ -237,7 +277,7 @@ def main(arguments: argparse.Namespace) -> ExitCode:
 
     for address in sorted(addresses):
         try:
-            ips = get_ips(address)
+            ips = get_ips(str(address))
         except socket.gaierror as error:
             stderr(f"{address}: {error}, skipping")
             continue
@@ -247,6 +287,9 @@ def main(arguments: argparse.Namespace) -> ExitCode:
         for ip in sorted(ips):
             route = Route(ip, 32, gateway, interface)
             if arguments.remove:
+                if AddressOption.Permanent in address.options:
+                    continue
+
                 delete_ip_route(route, arguments.table, arguments.dry_run)
                 if arguments.ufw:
                     delete_ufw_rule(route, dry_run=arguments.dry_run)
