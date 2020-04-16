@@ -2,16 +2,19 @@
 
 import argparse
 import enum
+import functools
 import socket
 import socketserver
 import struct
+import sys
 import typing as T
 
 MAX_UDP_SIZE = 65536
 MESSAGE_HEADER_SIZE = 12
 
-LABEL_SIZE_STRUCT_FORMAT = "!b"
-LABEL_SIZE_STRUCT_FORMAT_SIZE = struct.calcsize(LABEL_SIZE_STRUCT_FORMAT)
+DNS_LABEL_SIZE_STRUCT_FORMAT = "!b"
+DNS_LABEL_SIZE_STRUCT_FORMAT_SIZE = struct.calcsize(DNS_LABEL_SIZE_STRUCT_FORMAT)
+DNS_LABEL_ENCODING = "ASCII"
 
 
 def get_argument_parser() -> argparse.ArgumentParser:
@@ -31,18 +34,20 @@ class ExitCode(enum.IntEnum):
 
 # https://en.wikipedia.org/wiki/Domain_Name_System#Structure
 # http://www.tcpipguide.com/free/t_DNSMessageHeaderandQuestionSectionFormat.htm
-def parse_dns_question_name(data: bytes) -> str:
+def parse_question_name(data: bytes) -> str:
     # Skip message header
     data = data[MESSAGE_HEADER_SIZE:]
     labels = []
 
     offset = 0
-    while (size := struct.unpack_from(LABEL_SIZE_STRUCT_FORMAT, data, offset)[0]) > 0:
-        offset += LABEL_SIZE_STRUCT_FORMAT_SIZE
+    while (
+        label_size := struct.unpack_from(DNS_LABEL_SIZE_STRUCT_FORMAT, data, offset)[0]
+    ) > 0:
+        offset += DNS_LABEL_SIZE_STRUCT_FORMAT_SIZE
 
-        label_format = f"!{size}s"
+        label_format = f"!{label_size}s"
         label = struct.unpack_from(label_format, data, offset)[0]
-        labels.append(label.decode("ASCII"))
+        labels.append(label.decode(DNS_LABEL_ENCODING))
 
         offset += struct.calcsize(label_format)
 
@@ -59,7 +64,7 @@ class DNSProxyHandler(socketserver.BaseRequestHandler):
 
     # noinspection PyUnresolvedReferences
     def handle(self) -> None:
-        name = parse_dns_question_name(self.request[0])
+        name = parse_question_name(self.request[0])
         print("Requested:", name)
 
         self.remote_socket.sendto(self.request[0], self.remote_address)
@@ -76,6 +81,9 @@ def get_dns_proxy_handler_factory(
     return factory
 
 
+stderr = functools.partial(print, file=sys.stderr)
+
+
 # noinspection PyShadowingNames
 def main(arguments: argparse.Namespace) -> ExitCode:
     address = arguments.host, arguments.port
@@ -83,7 +91,10 @@ def main(arguments: argparse.Namespace) -> ExitCode:
     factory = get_dns_proxy_handler_factory(remote_address)
 
     with socketserver.ThreadingUDPServer(address, factory) as server:
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            stderr("Aborted.")
 
     return ExitCode.Success
 
