@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+
+import argparse
+import enum
+import socket
+import socketserver
+import struct
+import typing as T
+
+MAX_UDP_SIZE = 65536
+MESSAGE_HEADER_SIZE = 12
+
+LABEL_SIZE_STRUCT_FORMAT = "!b"
+LABEL_SIZE_STRUCT_FORMAT_SIZE = struct.calcsize(LABEL_SIZE_STRUCT_FORMAT)
+
+
+def get_argument_parser() -> argparse.ArgumentParser:
+    # noinspection PyShadowingNames
+    parser = argparse.ArgumentParser()
+    parser.add_argument("remote_host")
+    parser.add_argument("-H", "--host", default="localhost")
+    parser.add_argument("-p", "--port", type=int, default=53)
+    parser.add_argument("-P", "--remote-port", type=int, default=53)
+    return parser
+
+
+class ExitCode(enum.IntEnum):
+    Success = 0
+    Failure = 1
+
+
+# https://en.wikipedia.org/wiki/Domain_Name_System#Structure
+# http://www.tcpipguide.com/free/t_DNSMessageHeaderandQuestionSectionFormat.htm
+def parse_dns_question_name(data: bytes) -> str:
+    # Skip message header
+    data = data[MESSAGE_HEADER_SIZE:]
+    labels = []
+
+    offset = 0
+    while (size := struct.unpack_from(LABEL_SIZE_STRUCT_FORMAT, data, offset)[0]) > 0:
+        offset += LABEL_SIZE_STRUCT_FORMAT_SIZE
+
+        label_format = f"!{size}s"
+        label = struct.unpack_from(label_format, data, offset)[0]
+        labels.append(label.decode("ASCII"))
+
+        offset += struct.calcsize(label_format)
+
+    return ".".join(labels)
+
+
+class DNSProxyHandler(socketserver.BaseRequestHandler):
+    def __init__(
+        self, remote_address: T.Tuple[str, int], *args: T.Any, **kwargs: T.Any
+    ):
+        self.remote_address = remote_address
+        self.remote_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        super().__init__(*args, **kwargs)
+
+    # noinspection PyUnresolvedReferences
+    def handle(self) -> None:
+        name = parse_dns_question_name(self.request[0])
+        print("Requested:", name)
+
+        self.remote_socket.sendto(self.request[0], self.remote_address)
+        received = self.remote_socket.recv(MAX_UDP_SIZE)
+        self.request[1].sendto(received, self.client_address)
+
+
+def get_dns_proxy_handler_factory(
+    remote_address: T.Tuple[str, int]
+) -> T.Callable[..., DNSProxyHandler]:
+    def factory(*args: T.Any, **kwargs: T.Any) -> DNSProxyHandler:
+        return DNSProxyHandler(remote_address, *args, **kwargs)
+
+    return factory
+
+
+# noinspection PyShadowingNames
+def main(arguments: argparse.Namespace) -> ExitCode:
+    address = arguments.host, arguments.port
+    remote_address = arguments.remote_host, arguments.remote_port
+    factory = get_dns_proxy_handler_factory(remote_address)
+
+    with socketserver.ThreadingUDPServer(address, factory) as server:
+        server.serve_forever()
+
+    return ExitCode.Success
+
+
+if __name__ == "__main__":
+    parser = get_argument_parser()
+    arguments = parser.parse_args()
+    parser.exit(main(arguments))
