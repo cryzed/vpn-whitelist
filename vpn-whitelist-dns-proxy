@@ -135,6 +135,8 @@ def main(
         except KeyboardInterrupt:
             stderr("Aborting...")
 
+    # TODO: Parse DNS answer instead and don't re-resolve addresses at end of runtime,
+    #       after the A-records might have changed
     if not arguments.keep:
         vpn_whitelist_arguments.append("--remove")
         for address in sorted(whitelisted):
