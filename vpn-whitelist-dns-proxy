@@ -3,9 +3,11 @@
 import argparse
 import enum
 import functools
+import re
 import socket
 import socketserver
 import struct
+import subprocess
 import sys
 import typing as T
 
@@ -16,14 +18,18 @@ DNS_LABEL_SIZE_STRUCT_FORMAT = "!b"
 DNS_LABEL_SIZE_STRUCT_FORMAT_SIZE = struct.calcsize(DNS_LABEL_SIZE_STRUCT_FORMAT)
 DNS_LABEL_ENCODING = "ASCII"
 
+whitelisted = set()
+
 
 def get_argument_parser() -> argparse.ArgumentParser:
     # noinspection PyShadowingNames
     parser = argparse.ArgumentParser()
     parser.add_argument("remote_host")
+    parser.add_argument("regexes", nargs="+")
     parser.add_argument("-H", "--host", default="localhost")
     parser.add_argument("-p", "--port", type=int, default=53)
     parser.add_argument("-P", "--remote-port", type=int, default=53)
+    parser.add_argument("-k", "--keep", action="store_true")
     return parser
 
 
@@ -54,29 +60,57 @@ def parse_question_name(data: bytes) -> str:
     return ".".join(labels)
 
 
+# noinspection PyShadowingNames
+def vpn_whitelist(address: str, arguments: T.List[str]):
+    command = ["vpn-whitelist", address, *arguments]
+    print(" ".join(command))
+    subprocess.run(command)
+
+
 class DNSProxyHandler(socketserver.BaseRequestHandler):
     def __init__(
-        self, remote_address: T.Tuple[str, int], *args: T.Any, **kwargs: T.Any
+        self,
+        remote_address: T.Tuple[str, int],
+        regexes: T.List[str],
+        vpn_whitelist_arguments: T.List[str],
+        *args: T.Any,
+        **kwargs: T.Any,
     ):
         self.remote_address = remote_address
+
+        # TODO: Move this out of the constructor
+        self.regexes = [re.compile(regex, re.IGNORECASE) for regex in regexes]
+        self.vpn_whitelist_arguments = vpn_whitelist_arguments
+
         self.remote_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         super().__init__(*args, **kwargs)
 
     # noinspection PyUnresolvedReferences
     def handle(self) -> None:
-        name = parse_question_name(self.request[0])
-        print("Requested:", name)
-
         self.remote_socket.sendto(self.request[0], self.remote_address)
         received = self.remote_socket.recv(MAX_UDP_SIZE)
         self.request[1].sendto(received, self.client_address)
 
+        name = parse_question_name(self.request[0])
+        if name in whitelisted:
+            return
+
+        for regex in self.regexes:
+            if regex.match(name):
+                whitelisted.add(name)
+                vpn_whitelist(name, self.vpn_whitelist_arguments)
+                break
+
 
 def get_dns_proxy_handler_factory(
-    remote_address: T.Tuple[str, int]
+    remote_address: T.Tuple[str, int],
+    regexes: T.List[str],
+    vpn_whitelist_arguments: T.List[str],
 ) -> T.Callable[..., DNSProxyHandler]:
     def factory(*args: T.Any, **kwargs: T.Any) -> DNSProxyHandler:
-        return DNSProxyHandler(remote_address, *args, **kwargs)
+        return DNSProxyHandler(
+            remote_address, regexes, vpn_whitelist_arguments, *args, **kwargs
+        )
 
     return factory
 
@@ -85,21 +119,30 @@ stderr = functools.partial(print, file=sys.stderr)
 
 
 # noinspection PyShadowingNames
-def main(arguments: argparse.Namespace) -> ExitCode:
-    address = arguments.host, arguments.port
+def main(
+    arguments: argparse.Namespace, vpn_whitelist_arguments: T.List[str]
+) -> ExitCode:
+    local_address = arguments.host, arguments.port
     remote_address = arguments.remote_host, arguments.remote_port
-    factory = get_dns_proxy_handler_factory(remote_address)
+    factory = get_dns_proxy_handler_factory(
+        remote_address, arguments.regexes, vpn_whitelist_arguments
+    )
 
-    with socketserver.ThreadingUDPServer(address, factory) as server:
+    with socketserver.ThreadingUDPServer(local_address, factory) as server:
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             stderr("Aborted.")
+
+    if not arguments.keep:
+        vpn_whitelist_arguments.append("--remove")
+        for address in sorted(whitelisted):
+            vpn_whitelist(address, vpn_whitelist_arguments)
 
     return ExitCode.Success
 
 
 if __name__ == "__main__":
     parser = get_argument_parser()
-    arguments = parser.parse_args()
-    parser.exit(main(arguments))
+    arguments, rest = parser.parse_known_args()
+    parser.exit(main(arguments, rest))
