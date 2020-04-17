@@ -25,7 +25,7 @@ def get_argument_parser() -> argparse.ArgumentParser:
     # noinspection PyShadowingNames
     parser = argparse.ArgumentParser()
     parser.add_argument("remote_host")
-    parser.add_argument("regexes", nargs="+")
+    parser.add_argument("regexes", nargs="*", default=[])
     parser.add_argument("-H", "--host", default="localhost")
     parser.add_argument("-p", "--port", type=int, default=53)
     parser.add_argument("-P", "--remote-port", type=int, default=53)
@@ -67,6 +67,9 @@ def vpn_whitelist(address: str, arguments: T.List[str]):
     subprocess.run(command)
 
 
+stderr = functools.partial(print, file=sys.stderr)
+
+
 class DNSProxyHandler(socketserver.BaseRequestHandler):
     def __init__(
         self,
@@ -92,6 +95,7 @@ class DNSProxyHandler(socketserver.BaseRequestHandler):
         self.request[1].sendto(received, self.client_address)
 
         name = parse_question_name(self.request[0])
+        stderr("Requested:", name)
         if name in whitelisted:
             return
 
@@ -113,9 +117,6 @@ def get_dns_proxy_handler_factory(
         )
 
     return factory
-
-
-stderr = functools.partial(print, file=sys.stderr)
 
 
 # noinspection PyShadowingNames
