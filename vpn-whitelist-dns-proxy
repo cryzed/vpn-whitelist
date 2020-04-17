@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
 import argparse
+import collections
+import dataclasses
 import enum
 import functools
 import re
@@ -11,12 +13,29 @@ import subprocess
 import sys
 import typing as T
 
-MAX_UDP_SIZE = 65536
-MESSAGE_HEADER_SIZE = 12
+# https://en.wikipedia.org/wiki/Domain_Name_System#Structure
+# http://www.tcpipguide.com/free/t_DNSMessageHeaderandQuestionSectionFormat.htm
+# TODO: Fix DNS corner case where the correct label isn't read
 
-DNS_LABEL_SIZE_STRUCT_FORMAT = "!b"
-DNS_LABEL_SIZE_STRUCT_FORMAT_SIZE = struct.calcsize(DNS_LABEL_SIZE_STRUCT_FORMAT)
+MAX_UDP_SIZE = 65536
+
+DNS_HEADER_STRUCT_FORMAT = "!2s2sHHHH"
+DNS_HEADER_SIZE = struct.calcsize(DNS_HEADER_STRUCT_FORMAT)
+
+DNS_LABEL_POINTER_STRUCT_FORMAT = "!BB"
+DNS_LABEL_POINTER_SIZE = struct.calcsize(DNS_LABEL_POINTER_STRUCT_FORMAT)
+
+DNS_LABEL_SIZE_STRUCT_FORMAT = "!B"
+DNS_LABEL_SIZE_SIZE = struct.calcsize(DNS_LABEL_SIZE_STRUCT_FORMAT)
 DNS_LABEL_ENCODING = "ASCII"
+
+DNS_QUESTION_RECORD_STRUCT_FORMAT = "!HH"
+DNS_QUESTION_RECORD_SIZE = struct.calcsize(DNS_QUESTION_RECORD_STRUCT_FORMAT)
+
+DNS_RESOURCE_RECORD_STRUCT_FORMAT = "!HHiH"
+DNS_RESOURCE_RECORD_STRUCT_SIZE = struct.calcsize(DNS_RESOURCE_RECORD_STRUCT_FORMAT)
+
+DNS_A_RECORD_STRUCT_FORMAT = "!BBBB"
 
 whitelisted = set()
 
@@ -38,26 +57,149 @@ class ExitCode(enum.IntEnum):
     Failure = 1
 
 
-# https://en.wikipedia.org/wiki/Domain_Name_System#Structure
-# http://www.tcpipguide.com/free/t_DNSMessageHeaderandQuestionSectionFormat.htm
-def parse_question_name(data: bytes) -> str:
-    # Skip message header
-    data = data[MESSAGE_HEADER_SIZE:]
+@dataclasses.dataclass
+class DNSHeader:
+    id_: bytes
+    flags: bytes
+    qdcount: int
+    ancount: int
+    nscount: int
+    arcount: int
+
+
+@dataclasses.dataclass
+class DNSQuestionRecord:
+    name: str
+    type_: int
+    class_: int
+
+
+@dataclasses.dataclass
+class DNSResourceRecord:
+    name: str
+    type_: int
+    class_: int
+    ttl: int
+    rdlength: int
+    rdata: bytes
+
+
+@dataclasses.dataclass
+class DNSMessage:
+    header: DNSHeader
+    question_records: T.List[DNSQuestionRecord]
+    answer_records: T.List[DNSResourceRecord]
+    authority_records: T.List[DNSResourceRecord]
+    additional_records: T.List[DNSResourceRecord]
+
+
+def parse_dns_header(data: bytes) -> T.Tuple[DNSHeader, int]:
+    header = DNSHeader(*struct.unpack_from(DNS_HEADER_STRUCT_FORMAT, data))
+    return header, DNS_HEADER_SIZE
+
+
+@functools.lru_cache
+def parse_dns_name_notation(data: bytes, offset: int = 0) -> T.Tuple[T.Union[str], int]:
     labels = []
 
-    offset = 0
-    while (
-        label_size := struct.unpack_from(DNS_LABEL_SIZE_STRUCT_FORMAT, data, offset)[0]
-    ) > 0:
-        offset += DNS_LABEL_SIZE_STRUCT_FORMAT_SIZE
+    # print("parse_dns_name_notation", "Offset:", offset)
 
-        label_format = f"!{label_size}s"
-        label = struct.unpack_from(label_format, data, offset)[0]
-        labels.append(label.decode(DNS_LABEL_ENCODING))
+    while True:
+        indicator, pointer = struct.unpack_from(
+            DNS_LABEL_POINTER_STRUCT_FORMAT, data, offset
+        )
 
-        offset += struct.calcsize(label_format)
+        is_pointer = indicator >= 192
+        # print("Indicator:", indicator, "Pointer:", pointer, "Is Pointer:", is_pointer)
+        if is_pointer:
+            label = parse_dns_name_notation(data, pointer)[0]
+            labels.append(label)
+            offset += DNS_LABEL_POINTER_SIZE
+            break
 
-    return ".".join(labels)
+        label_size = struct.unpack_from(DNS_LABEL_SIZE_STRUCT_FORMAT, data, offset)[0]
+        offset += DNS_LABEL_SIZE_SIZE
+        is_root_label = label_size == 0
+        if is_root_label:
+            break
+
+        label_struct_format = f"!{label_size}s"
+        label_bytes = struct.unpack_from(label_struct_format, data, offset)[0]
+
+        try:
+            label = label_bytes.decode(DNS_LABEL_ENCODING)
+        except UnicodeDecodeError as error:
+            print(repr(label_bytes), error)
+            label = "?"
+
+        labels.append(label)
+        offset += struct.calcsize(label_struct_format)
+
+    return ".".join(labels), offset
+
+
+def parse_dns_question_record(
+    data: bytes, offset: int = 0
+) -> T.Tuple[DNSQuestionRecord, int]:
+    name, offset = parse_dns_name_notation(data, offset)
+    # print("Name:", name, "Offset:", offset)
+
+    type_, class_ = struct.unpack_from(DNS_QUESTION_RECORD_STRUCT_FORMAT, data, offset)
+    return DNSQuestionRecord(name, type_, class_), offset + DNS_QUESTION_RECORD_SIZE
+
+
+def parse_dns_resource_record(
+    data: bytes, offset: int = 0
+) -> T.Tuple[DNSResourceRecord, int]:
+    name, offset = parse_dns_name_notation(data, offset)
+    type_, class_, ttl, rdlength = struct.unpack_from(
+        DNS_RESOURCE_RECORD_STRUCT_FORMAT, data, offset
+    )
+    rdata_format = f"!{rdlength}s"
+    offset += DNS_RESOURCE_RECORD_STRUCT_SIZE
+    rdata = struct.unpack_from(rdata_format, data, offset)[0]
+    rdata_format_size = struct.calcsize(rdata_format)
+
+    return (
+        DNSResourceRecord(name, type_, class_, ttl, rdlength, rdata),
+        offset + rdata_format_size,
+    )
+
+
+def parse_dns_message(data: bytes) -> DNSMessage:
+    header, offset = parse_dns_header(data)
+    # print("Header:", header, "Offset:", offset)
+
+    # TODO: Closure
+    questions = []
+    for _ in range(header.qdcount):
+        question, offset = parse_dns_question_record(data, offset)
+        questions.append(question)
+
+    answers = []
+    for _ in range(header.ancount):
+        answer, offset = parse_dns_resource_record(data, offset)
+        answers.append(answer)
+
+    authorities = []
+    for _ in range(header.nscount):
+        authority, offset = parse_dns_resource_record(data, offset)
+        authorities.append(authority)
+
+    additionals = []
+    for _ in range(header.arcount):
+        additional, offset = parse_dns_resource_record(data, offset)
+        additionals.append(additional)
+
+    return DNSMessage(header, questions, answers, authorities, additionals)
+
+
+def get_dns_a_record_data(record: DNSResourceRecord) -> str:
+    if record.type_ != 1:
+        raise ValueError(f"wrong record type: {type!r}")
+
+    quads = struct.unpack_from(DNS_A_RECORD_STRUCT_FORMAT, record.rdata)
+    return ".".join(str(octet) for octet in quads)
 
 
 # noinspection PyShadowingNames
@@ -90,20 +232,38 @@ class DNSProxyHandler(socketserver.BaseRequestHandler):
 
     # noinspection PyUnresolvedReferences
     def handle(self) -> None:
-        self.remote_socket.sendto(self.request[0], self.remote_address)
-        received = self.remote_socket.recv(MAX_UDP_SIZE)
-        self.request[1].sendto(received, self.client_address)
+        local_received, local_socket = self.request[0], self.request[1]
 
-        name = parse_question_name(self.request[0])
-        stderr("Requested:", name)
-        if name in whitelisted:
-            return
+        self.remote_socket.sendto(local_received, self.remote_address)
+        remote_received = self.remote_socket.recv(MAX_UDP_SIZE)
 
-        for regex in self.regexes:
-            if regex.match(name):
-                whitelisted.add(name)
-                vpn_whitelist(name, self.vpn_whitelist_arguments)
-                break
+        query_message = parse_dns_message(local_received)
+
+        stderr("Query:", ", ".join(q.name for q in query_message.question_records))
+
+        matched = set()
+        for question in query_message.question_records:
+            if question.name not in whitelisted and any(
+                regex.match(question.name) for regex in self.regexes
+            ):
+                whitelisted.add(question.name)
+                matched.add(question.name)
+                # vpn_whitelist(question.name, self.vpn_whitelist_arguments)
+
+        name_to_a_record = collections.defaultdict(list)
+        reply_message = parse_dns_message(remote_received)
+        for answer in reply_message.answer_records:
+            if answer.type_ == 1:
+                ip = get_dns_a_record_data(answer)
+                name_to_a_record[answer.name].append(ip)
+
+                # Make sure to add all resolved IPs to the set of whitelisted addresses
+                # so they can be reliably removed using vpn-whitelist during exit
+                if answer.name in matched:
+                    whitelisted.add(ip)
+
+        stderr("Reply:", dict(name_to_a_record), end="\n\n")
+        local_socket.sendto(remote_received, self.client_address)
 
 
 def get_dns_proxy_handler_factory(
@@ -135,8 +295,6 @@ def main(
         except KeyboardInterrupt:
             stderr("Aborting...")
 
-    # TODO: Parse DNS answer instead and don't re-resolve addresses at end of runtime,
-    #       after the A-records might have changed
     if not arguments.keep:
         vpn_whitelist_arguments.append("--remove")
         for address in sorted(whitelisted):
