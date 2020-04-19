@@ -10,8 +10,8 @@ source=('vpn-whitelist'
         'vpn-whitelist-dns-proxy'
         'vpn-whitelist.conf'
         'vpn-whitelist.NetworkManager-dispatcher')
-md5sums=('ce178bc684c5a12dfecdc0095c0ef21e'
-         'b812f6cc90e820546e895ee8ba47734d'
+md5sums=('5b7d68478fae06d82c93735d6d0a2716'
+         '14da38da4955b87d24cb72250ab57cb2'
          'fe878b7f244636858b8ead0714d403ee'
          '50f3b1dcbb8220b809b0877e6e7668b1')
 

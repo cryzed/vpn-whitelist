@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import typing as T
+from datetime import datetime
 
 # https://en.wikipedia.org/wiki/Domain_Name_System#Structure
 # http://www.tcpipguide.com/free/t_DNSMessageHeaderandQuestionSectionFormat.htm
@@ -31,18 +32,33 @@ DNS_RESOURCE_RECORD_STRUCT_FORMAT = "!HHiH"
 DNS_RESOURCE_RECORD_STRUCT_SIZE = struct.calcsize(DNS_RESOURCE_RECORD_STRUCT_FORMAT)
 DNS_A_RECORD_STRUCT_FORMAT = "!BBBB"
 
-whitelisted = set()
+whitelisted: T.Set[str] = set()
 
 
 def get_argument_parser() -> argparse.ArgumentParser:
     # noinspection PyShadowingNames
-    parser = argparse.ArgumentParser()
-    parser.add_argument("remote_host")
-    parser.add_argument("regexes", nargs="*", default=[])
-    parser.add_argument("-H", "--host", default="localhost")
-    parser.add_argument("-p", "--port", type=int, default=53)
-    parser.add_argument("-P", "--remote-port", type=int, default=53)
-    parser.add_argument("-k", "--keep", action="store_true")
+    parser = argparse.ArgumentParser(
+        description='Unrecognized arguments will be forwarded to "vpn-whitelist"',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("remote_host", help="Remote DNS host")
+    parser.add_argument(
+        "regexes",
+        nargs="*",
+        default=[],
+        help="Regular expressions used to match queried addresses",
+    )
+    parser.add_argument("-H", "--host", default="localhost", help="Address to bind to")
+    parser.add_argument("-p", "--port", type=int, default=53, help="Port to listen on")
+    parser.add_argument(
+        "-P", "--remote-port", type=int, default=53, help="Remote DNS port"
+    )
+    parser.add_argument(
+        "-k",
+        "--keep",
+        action="store_true",
+        help="Don't remove whitelisted addresses during exit",
+    )
     return parser
 
 
@@ -191,8 +207,8 @@ def get_dns_a_record_data(record: DNSResourceRecord) -> str:
 
 
 # noinspection PyShadowingNames
-def vpn_whitelist(address: str, arguments: T.List[str]) -> None:
-    command = ["vpn-whitelist", address, *arguments]
+def vpn_whitelist(addresses: T.List[str], arguments: T.List[str]) -> None:
+    command = ["vpn-whitelist", *addresses, *arguments]
     print(" ".join(command))
     subprocess.run(command)
 
@@ -219,38 +235,40 @@ class DNSProxyHandler(socketserver.BaseRequestHandler):
         super().__init__(*args, **kwargs)
 
     def handle(self) -> None:
-        local_received, local_socket = self.request[0], self.request[1]
-
+        local_received, local_socket = self.request[:2]
         self.remote_socket.sendto(local_received, self.remote_address)
         remote_received = self.remote_socket.recv(MAX_UDP_SIZE)
-        local_socket.sendto(remote_received, self.client_address)
-
         query_message = parse_dns_message(local_received)
-        stderr("Query:", ", ".join(q.name for q in query_message.question_records))
-        matched = set()
-        for question in query_message.question_records:
-            name = question.name
-            if name not in whitelisted and any(
-                regex.match(name) for regex in self.regexes
-            ):
-                whitelisted.add(name)
-                matched.add(name)
-                vpn_whitelist(name, self.vpn_whitelist_arguments)
+        stderr("Query:", [q.name for q in query_message.question_records])
 
-        name_to_a_record = collections.defaultdict(list)
         reply_message = parse_dns_message(remote_received)
+        name_to_a_record = collections.defaultdict(set)
         for answer in reply_message.answer_records:
-            name = answer.name
             if answer.type_ == 1:
                 ip = get_dns_a_record_data(answer)
-                name_to_a_record[name].append(ip)
-
-                # Make sure to add all resolved IPs to the set of whitelisted addresses
-                # so they can be reliably removed using vpn-whitelist during exit
-                if name in matched:
-                    whitelisted.add(ip)
+                name_to_a_record[answer.name].add(ip)
 
         stderr("Reply:", dict(name_to_a_record), end="\n\n")
+
+        for name, ips in name_to_a_record.items():
+            if not any(regex.match(name) for regex in self.regexes):
+                continue
+
+            not_whitelisted = ips - whitelisted
+            if not not_whitelisted:
+                continue
+
+            # noinspection PyShadowingNames
+            arguments = self.vpn_whitelist_arguments.copy()
+            time_string = datetime.now().isoformat(sep=" ", timespec="seconds")
+            arguments.extend(
+                ["--comment", f"Whitelist DNS Proxy {name} ({time_string})"]
+            )
+
+            vpn_whitelist(sorted(not_whitelisted), arguments)
+            whitelisted.update(not_whitelisted)
+
+        local_socket.sendto(remote_received, self.client_address)
 
 
 def get_dns_proxy_handler_factory(
@@ -283,9 +301,9 @@ def main(
             stderr("Aborting...")
 
     if not arguments.keep:
-        vpn_whitelist_arguments.append("--remove")
-        for address in sorted(whitelisted):
-            vpn_whitelist(address, vpn_whitelist_arguments)
+        arguments = vpn_whitelist_arguments.copy()
+        arguments.append("--remove")
+        vpn_whitelist(sorted(whitelisted), arguments)
 
     return ExitCode.Success
 

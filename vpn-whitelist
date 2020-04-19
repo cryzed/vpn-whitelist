@@ -114,6 +114,9 @@ def get_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do nothing, only print the changes to the network configuration",
     )
+    parser.add_argument(
+        "--comment", "-c", default="Comment used for the UFW whitelist rule"
+    )
     return parser
 
 
@@ -296,8 +299,14 @@ def main(arguments: argparse.Namespace) -> ExitCode:
             else:
                 add_ip_route(route, arguments.table, arguments.dry_run)
                 if arguments.ufw:
-                    time_string = datetime.now().isoformat(sep=" ", timespec="seconds")
-                    comment = f"Whitelist {address} ({time_string})"
+                    if not arguments.comment:
+                        time_string = datetime.now().isoformat(
+                            sep=" ", timespec="seconds"
+                        )
+                        comment = f"Whitelist {address} ({time_string})"
+                    else:
+                        comment = arguments.comment
+
                     add_ufw_rule(route, comment, arguments.dry_run)
 
         stderr()
