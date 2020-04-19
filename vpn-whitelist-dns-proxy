@@ -301,9 +301,9 @@ def main(
             stderr("Aborting...")
 
     if not arguments.keep:
-        arguments = vpn_whitelist_arguments.copy()
-        arguments.append("--remove")
-        vpn_whitelist(sorted(whitelisted), arguments)
+        remove_vpn_whitelist_arguments = vpn_whitelist_arguments.copy()
+        remove_vpn_whitelist_arguments.append("--remove")
+        vpn_whitelist(sorted(whitelisted), remove_vpn_whitelist_arguments)
 
     return ExitCode.Success
 
