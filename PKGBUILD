@@ -11,7 +11,7 @@ source=('vpn-whitelist'
         'vpn-whitelist.conf'
         'vpn-whitelist.NetworkManager-dispatcher')
 md5sums=('25c86091bf5c60909556ae7050518a38'
-         'd4938a0f02ae99950efd4660afdda235'
+         '514eb8975a1049d92386e6d7ef2cd7be'
          'fe878b7f244636858b8ead0714d403ee'
          '50f3b1dcbb8220b809b0877e6e7668b1')
 
