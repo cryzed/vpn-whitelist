@@ -1,8 +1,8 @@
 # vpn-whitelist
 
-Small foreword: I realize how complex many network configurations and how vastly they
-can differ: some people might dislike `UFW` and prefer using `iptables` directly, or
-don't use `NetworkManager` at all. Please keep in mind that this is _mostly_ for my
+Small foreword: I realize how complex many network configurations are and how vastly
+they can differ: some people might dislike `UFW` and prefer using `iptables` directly,
+or don't use `NetworkManager` at all. Please keep in mind that this is _mostly_ for my
 private use. I released this just in case someone else has a use for it, and I spend too
 much time on it not to share it -- this is all to say, I most likely won't add options
 for your specific network configuration and wishes if this doesn't do it for you.
