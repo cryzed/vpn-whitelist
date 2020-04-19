@@ -133,7 +133,8 @@ def get_routing_table(table: str = DEFAULT_IP_ROUTE_TABLE) -> T.List[Route]:
 
     table_list = []
     for line in process.stdout.splitlines():
-        if not (match := IP_ROUTE_REGEX.match(line)):
+        match = IP_ROUTE_REGEX.match(line)
+        if not match:
             continue
 
         groups = match.groupdict()
