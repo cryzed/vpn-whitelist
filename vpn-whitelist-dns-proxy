@@ -220,17 +220,14 @@ class DNSProxyHandler(socketserver.BaseRequestHandler):
     def __init__(
         self,
         remote_address: T.Tuple[str, int],
-        regexes: T.List[str],
+        regexes: T.List[T.Pattern[str]],
         vpn_whitelist_arguments: T.List[str],
         *args: T.Any,
         **kwargs: T.Any,
     ):
         self.remote_address = remote_address
-
-        # TODO: Move this out of the constructor
-        self.regexes = [re.compile(regex, re.IGNORECASE) for regex in regexes]
+        self.regexes = regexes
         self.vpn_whitelist_arguments = vpn_whitelist_arguments
-
         self.remote_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         super().__init__(*args, **kwargs)
 
@@ -273,7 +270,7 @@ class DNSProxyHandler(socketserver.BaseRequestHandler):
 
 def get_dns_proxy_handler_factory(
     remote_address: T.Tuple[str, int],
-    regexes: T.List[str],
+    regexes: T.List[T.Pattern[str]],
     vpn_whitelist_arguments: T.List[str],
 ) -> T.Callable[..., DNSProxyHandler]:
     def factory(*args: T.Any, **kwargs: T.Any) -> DNSProxyHandler:
@@ -290,8 +287,9 @@ def main(
 ) -> ExitCode:
     local_address = arguments.host, arguments.port
     remote_address = arguments.remote_host, arguments.remote_port
+    regexes = [re.compile(regex, re.IGNORECASE) for regex in arguments.regexes]
     factory = get_dns_proxy_handler_factory(
-        remote_address, arguments.regexes, vpn_whitelist_arguments
+        remote_address, regexes, vpn_whitelist_arguments
     )
 
     with socketserver.ThreadingUDPServer(local_address, factory) as server:
