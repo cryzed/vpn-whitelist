@@ -115,7 +115,7 @@ def get_argument_parser() -> argparse.ArgumentParser:
         help="Do nothing, only print the changes to the network configuration",
     )
     parser.add_argument(
-        "--comment", "-c", default="Comment used for the UFW whitelist rule"
+        "--comment", "-c", help="Comment used for the UFW whitelist rule"
     )
     return parser
 
