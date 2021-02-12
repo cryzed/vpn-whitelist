@@ -19,6 +19,13 @@ DEFAULT_IP_ROUTE_TABLE = "main"
 ADDRESS_FILE_ENCODING = "UTF-8"
 
 
+# TODO: Use this instead of (ip, mask) tuples
+# @dataclasses.dataclass
+# class IPRange:
+#     address: str
+#     mask: int = 32
+
+
 @dataclasses.dataclass
 class Route:
     destination: str
@@ -71,9 +78,7 @@ class UFWAction(enum.Enum):
 
 def get_argument_parser() -> argparse.ArgumentParser:
     # noinspection PyShadowingNames
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
         "addresses",
         metavar="address",
@@ -99,24 +104,16 @@ def get_argument_parser() -> argparse.ArgumentParser:
         "-i",
         help="Manually specify the network interface through which to route the traffic",
     )
-    parser.add_argument(
-        "--gateway", "-g", help="Manually specify the network interface's gateway"
-    )
-    parser.add_argument(
-        "--ufw", "-u", action="store_true", help="Create UFW whitelist rules"
-    )
-    parser.add_argument(
-        "--table", "-t", default=DEFAULT_IP_ROUTE_TABLE, help="The target routing table"
-    )
+    parser.add_argument("--gateway", "-g", help="Manually specify the network interface's gateway")
+    parser.add_argument("--ufw", "-u", action="store_true", help="Create UFW whitelist rules")
+    parser.add_argument("--table", "-t", default=DEFAULT_IP_ROUTE_TABLE, help="The target routing table")
     parser.add_argument(
         "--dry-run",
         "-d",
         action="store_true",
         help="Do nothing, only print the changes to the network configuration",
     )
-    parser.add_argument(
-        "--comment", "-c", help="Comment used for the UFW whitelist rule"
-    )
+    parser.add_argument("--comment", "-c", help="Comment used for the UFW whitelist rule")
     return parser
 
 
@@ -157,8 +154,14 @@ def get_default_route(table: str = DEFAULT_IP_ROUTE_TABLE) -> T.Optional[Route]:
     return None
 
 
-def get_ips(address: str) -> T.Set[str]:
-    return set(info[4][0] for info in socket.getaddrinfo(address, None))
+def get_ips(address: str) -> T.Set[T.Tuple[str, int]]:
+    parts = address.split("/", 1)
+    if len(parts) == 1:
+        mask = 32
+    else:
+        address, mask = parts[0], int(parts[1])
+
+    return set((info[4][0], mask) for info in socket.getaddrinfo(address, None))
 
 
 def ip_route(
@@ -186,13 +189,17 @@ def ip_route(
 
 
 def add_ip_route(
-    route: Route, table: str = DEFAULT_IP_ROUTE_TABLE, dry_run: bool = False,
+    route: Route,
+    table: str = DEFAULT_IP_ROUTE_TABLE,
+    dry_run: bool = False,
 ) -> None:
     ip_route(IPRouteAction.Add, route, table, dry_run)
 
 
 def delete_ip_route(
-    route: Route, table: str = DEFAULT_IP_ROUTE_TABLE, dry_run: bool = False,
+    route: Route,
+    table: str = DEFAULT_IP_ROUTE_TABLE,
+    dry_run: bool = False,
 ) -> None:
     ip_route(IPRouteAction.Delete, route, table, dry_run)
 
@@ -204,7 +211,7 @@ def ufw_rule(
     dry_run: bool = False,
 ) -> None:
     command = ["ufw", action.value] if action is UFWAction.Delete else ["ufw"]
-    command.extend(["allow", "out", "on", route.interface, "to", route.destination])
+    command.extend(["allow", "out", "on", route.interface, "to", f"{route.destination}/{route.mask}"])
     if comment is not None:
         command.extend(["comment", comment])
 
@@ -213,15 +220,11 @@ def ufw_rule(
         subprocess.run(command, stdout=subprocess.DEVNULL)
 
 
-def add_ufw_rule(
-    route: Route, comment: T.Optional[str] = None, dry_run: bool = False
-) -> None:
+def add_ufw_rule(route: Route, comment: T.Optional[str] = None, dry_run: bool = False) -> None:
     ufw_rule(UFWAction.Add, route, comment, dry_run)
 
 
-def delete_ufw_rule(
-    route: Route, comment: T.Optional[str] = None, dry_run: bool = False
-) -> None:
+def delete_ufw_rule(route: Route, comment: T.Optional[str] = None, dry_run: bool = False) -> None:
     ufw_rule(UFWAction.Delete, route, comment, dry_run)
 
 
@@ -236,9 +239,7 @@ def parse_address_line(line: str) -> Address:
     return Address(parts[0], options)
 
 
-def read_address_file(
-    path: str, encoding: str = ADDRESS_FILE_ENCODING
-) -> T.Set[Address]:
+def read_address_file(path: str, encoding: str = ADDRESS_FILE_ENCODING) -> T.Set[Address]:
     addresses = set()
     with open(path, "r", encoding=encoding) as file:
         for line in file:
@@ -263,10 +264,7 @@ def main(arguments: argparse.Namespace) -> ExitCode:
     if gateway is None or interface is None:
         default_route = get_default_route(arguments.table)
         if not default_route:
-            stderr(
-                "Could not determine default route, specify with -i/--interface and "
-                "-g/--gateway"
-            )
+            stderr("Could not determine default route, specify with -i/--interface and -g/--gateway")
             return ExitCode.UnknownDefaultRoute
 
         gateway = gateway or default_route.gateway
@@ -288,8 +286,8 @@ def main(arguments: argparse.Namespace) -> ExitCode:
 
         stderr(f"{address}:")
 
-        for ip in sorted(ips):
-            route = Route(ip, 32, gateway, interface)
+        for ip, mask in sorted(ips):
+            route = Route(ip, mask, gateway, interface)
             if arguments.remove:
                 if AddressOption.Permanent in address.options:
                     continue
@@ -301,9 +299,7 @@ def main(arguments: argparse.Namespace) -> ExitCode:
                 add_ip_route(route, arguments.table, arguments.dry_run)
                 if arguments.ufw:
                     if not arguments.comment:
-                        time_string = datetime.now().isoformat(
-                            sep=" ", timespec="seconds"
-                        )
+                        time_string = datetime.now().isoformat(sep=" ", timespec="seconds")
                         comment = f"Whitelist {address} ({time_string})"
                     else:
                         comment = arguments.comment
