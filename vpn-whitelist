@@ -38,26 +38,10 @@ class AddressOption(enum.Enum):
     Permanent = "permanent"
 
 
-@functools.total_ordering
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, order=True, frozen=True)
 class Address:
-    name: str
-    options: T.Set[AddressOption] = dataclasses.field(default_factory=set)
-
-    def __str__(self) -> str:
-        return self.name
-
-    def __lt__(self, other: T.Union["Address", str]) -> bool:
-        return str(self) < str(other)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, (str, Address)):
-            return NotImplemented
-
-        return str(self) == str(other)
-
-    def __hash__(self) -> int:
-        return hash(self.name)
+    address: str
+    options: T.Tuple[AddressOption, ...] = ()
 
 
 class ExitCode(enum.IntEnum):
@@ -235,7 +219,7 @@ def parse_address_line(line: str) -> Address:
     if len(parts) == 1:
         return Address(line)
 
-    options = set(AddressOption(option.strip()) for option in parts[1].split(","))
+    options = tuple(AddressOption(option.strip()) for option in parts[1].split(","))
     return Address(parts[0], options)
 
 
@@ -279,13 +263,12 @@ def main(arguments: argparse.Namespace) -> ExitCode:
 
     for address in sorted(addresses):
         try:
-            ips = get_ips(str(address))
+            ips = get_ips(address.address)
         except socket.gaierror as error:
             stderr(f"{address}: {error}, skipping")
             continue
 
-        stderr(f"{address}:")
-
+        stderr(f"{address.address}:")
         for ip, mask in sorted(ips):
             route = Route(ip, mask, gateway, interface)
             if arguments.remove:
@@ -300,7 +283,7 @@ def main(arguments: argparse.Namespace) -> ExitCode:
                 if arguments.ufw:
                     if not arguments.comment:
                         time_string = datetime.now().isoformat(sep=" ", timespec="seconds")
-                        comment = f"Whitelist {address} ({time_string})"
+                        comment = f"Whitelist {address.address} ({time_string})"
                     else:
                         comment = arguments.comment
 
