@@ -1,5 +1,5 @@
 pkgname='vpn-whitelist'
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 arch=('any')
 depends=('python')
@@ -10,7 +10,7 @@ source=('vpn-whitelist'
         'vpn-whitelist-dns-proxy'
         'vpn-whitelist.conf'
         'vpn-whitelist.NetworkManager-dispatcher')
-md5sums=('25c86091bf5c60909556ae7050518a38'
+md5sums=('a05fee339ddc63ae8cbddf10112f1842'
          '514eb8975a1049d92386e6d7ef2cd7be'
          'fe878b7f244636858b8ead0714d403ee'
          '50f3b1dcbb8220b809b0877e6e7668b1')
