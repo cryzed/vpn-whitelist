@@ -1,5 +1,5 @@
 pkgname='vpn-whitelist'
-pkgver=1.1.0
+pkgver=1.2.0
 pkgrel=1
 arch=('any')
 depends=('python' 'python-psutil')
@@ -29,7 +29,7 @@ package() {
     install -D --mode 644 'vpn-whitelist.conf' --target-directory "$etc"
 
     # /etc/NetworkManager/dispatcher.d
-    #install -D --mode 755 'vpn-whitelist.NetworkManager-dispatcher' --target-directory "$etc/NetworkManager/dispatcher.d"
+    install -D --mode 755 'vpn-whitelist.NetworkManager-dispatcher' --target-directory "$etc/NetworkManager/dispatcher.d"
 
     # /etc/systemd/system/vpn-whitelist.service
     install -D --mode 755 'vpn-whitelist.service' --target-directory "$etc/systemd/system"
