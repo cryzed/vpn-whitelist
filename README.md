@@ -14,10 +14,18 @@ UFW. These rules and routes can be easily removed later.
 If you use and have enabled `NetworkManager` and `NetworkManager-dispatcher`
 systemd-units, you can also put addresses in `/etc/vpn-whitelist.conf` to be
 automatically whitelisted when a VPN tunnel goes up and remove them when it goes down.
+Alternatively you can run and enable the provided `systemd` service:
+
+`$ sudo systemctl enable --now vpn-whitelist`
+
+Or run the daemon yourself:
+
+`# vpn-whitelist --daemon`
+
 
 ```
-$ vpn-whitelist -h                                                                                                                                                              
-usage: vpn-whitelist [-h] [--remove] [--file FILES] [--interface INTERFACE] [--gateway GATEWAY] [--ufw] [--table TABLE] [--dry-run] [--comment COMMENT] [address [address ...]]
+$ vpn-whitelist --help
+usage: vpn-whitelist [-h] [--remove] [--file FILES] [--interface INTERFACE] [--gateway GATEWAY] [--ufw] [--table TABLE] [--dry-run] [--comment COMMENT] [--daemon] [--interval INTERVAL] [address ...]
 
 positional arguments:
   address               Domains or IPs to be whitelisted (default: None)
@@ -36,6 +44,10 @@ optional arguments:
                         The target routing table (default: main)
   --dry-run, -d         Do nothing, only print the changes to the network configuration (default: False)
   --comment COMMENT, -c COMMENT
+                        Comment used for the UFW whitelist rule (default: None)
+  --daemon, -D          Run daemon (default: False)
+  --interval INTERVAL, -I INTERVAL
+                        The interval the daemon waits before checking for changed network interfaces (default: 1)
 ```
 
 
