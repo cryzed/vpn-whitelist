@@ -84,6 +84,5 @@ optional arguments:
 If you are curious how exactly it works, feel free to read the sources, this is mostly
 for private use. Please note that this currently only supports IPv4, mostly because I
 have IPv6 disabled on my system (my VPN doesn't support it) and would have trouble
-supporting it. Adding support for AAAA-records (IPv6) to vpn-whitelist-dns-proxy would
+supporting it. Adding support for AAAA-records (IPv6) to `vpn-whitelist-dns-proxy` would
 be trivial however.
-
