@@ -9,11 +9,13 @@ backup=('etc/vpn-whitelist.conf')
 source=('vpn-whitelist'
         'vpn-whitelist-dns-proxy'
         'vpn-whitelist.conf'
-        'vpn-whitelist.NetworkManager-dispatcher')
-md5sums=('a05fee339ddc63ae8cbddf10112f1842'
-         '514eb8975a1049d92386e6d7ef2cd7be'
-         'fe878b7f244636858b8ead0714d403ee'
-         '50f3b1dcbb8220b809b0877e6e7668b1')
+        'vpn-whitelist.NetworkManager-dispatcher'
+        'vpn-whitelist.service')
+md5sums=('844d183c08133db6b29eccc150fec483'
+         'f9c4585de99299014e72d366e8a8e676'
+         '975da211e2ff74b472a938dca6f646b9'
+         '00037bd5bc12a3e4a35251b8b83c86ee'
+         '8ff50a3216e3d3de8b231b1fab163ef8')
 
 
 package() {
@@ -27,5 +29,8 @@ package() {
     install -D --mode 644 'vpn-whitelist.conf' --target-directory "$etc"
 
     # /etc/NetworkManager/dispatcher.d
-    install -D --mode 755 'vpn-whitelist.NetworkManager-dispatcher' --target-directory "$etc/NetworkManager/dispatcher.d"
+    #install -D --mode 755 'vpn-whitelist.NetworkManager-dispatcher' --target-directory "$etc/NetworkManager/dispatcher.d"
+
+    # /etc/systemd/system/vpn-whitelist.service
+    install -D --mode 755 'vpn-whitelist.service' --target-directory "$etc/systemd/system"
 }

@@ -1,10 +1,26 @@
 #!/usr/bin/env python
 
+# Copyright (C) 2021 cryzed
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 import argparse
 import enum
 import subprocess
 
-VPN_WHITELIST_ADDRESS_FILE = "/etc/vpn-whitelist.conf"
+VPN_WHITELIST_CONF_PATH = "/etc/vpn-whitelist.conf"
 
 
 class InterfaceAction(enum.Enum):
@@ -34,9 +50,9 @@ def main(arguments: argparse.Namespace) -> None:
         return
 
     if arguments.action is InterfaceAction.Up:
-        vpn_whitelist(VPN_WHITELIST_ADDRESS_FILE)
+        vpn_whitelist(VPN_WHITELIST_CONF_PATH)
     elif arguments.action is InterfaceAction.Down:
-        vpn_whitelist(VPN_WHITELIST_ADDRESS_FILE, remove=True)
+        vpn_whitelist(VPN_WHITELIST_CONF_PATH, remove=True)
 
 
 if __name__ == "__main__":

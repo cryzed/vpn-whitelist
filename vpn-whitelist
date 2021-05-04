@@ -1,5 +1,21 @@
 #!/usr/bin/env python
 
+# Copyright (C) 2021 cryzed
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 import argparse
 import dataclasses
 import enum
@@ -9,14 +25,18 @@ import shlex
 import socket
 import subprocess
 import sys
+import time
 import typing as T
 from datetime import datetime
+
+import psutil
 
 IP_ROUTE_REGEX = re.compile(
     r"(?P<destination>.+?)(/(?P<mask>\d+))?\s+via\s+(?P<gateway>.+?)\s+dev\s+(?P<interface>.+?)\s|$"
 )
 DEFAULT_IP_ROUTE_TABLE = "main"
 ADDRESS_FILE_ENCODING = "UTF-8"
+VPN_WHITELIST_CONF_PATH = "/etc/vpn-whitelist.conf"
 
 
 @dataclasses.dataclass
@@ -39,7 +59,7 @@ class AddressOption(enum.Enum):
 @dataclasses.dataclass(eq=True, order=True, frozen=True)
 class Address:
     address: str
-    options: T.Tuple[AddressOption, ...] = ()
+    options: tuple[AddressOption, ...] = ()
 
 
 class ExitCode(enum.IntEnum):
@@ -96,14 +116,22 @@ def get_argument_parser() -> argparse.ArgumentParser:
         help="Do nothing, only print the changes to the network configuration",
     )
     parser.add_argument("--comment", "-c", help="Comment used for the UFW whitelist rule")
+    parser.add_argument("--daemon", "-D", action="store_true", help="Run daemon")
+    parser.add_argument(
+        "--interval",
+        "-I",
+        type=float,
+        default=1,
+        help="The interval the daemon waits before checking for changed network interfaces",
+    )
     return parser
 
 
-def shell_escape(command: T.List[str]) -> str:
+def shell_escape(command: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
-def get_routing_table(table: str = DEFAULT_IP_ROUTE_TABLE) -> T.List[Route]:
+def get_routing_table(table: str = DEFAULT_IP_ROUTE_TABLE) -> list[Route]:
     process = subprocess.run(
         ["ip", "route", "show", "table", table],
         stdout=subprocess.PIPE,
@@ -136,7 +164,7 @@ def get_default_route(table: str = DEFAULT_IP_ROUTE_TABLE) -> T.Optional[Route]:
     return None
 
 
-def get_ips(address: str) -> T.Set[T.Tuple[str, int]]:
+def get_ips(address: str) -> set[tuple[str, int]]:
     parts = address.split("/", 1)
     if len(parts) == 1:
         mask = 32
@@ -194,7 +222,14 @@ def ufw_rule(
 ) -> None:
     command = ["ufw", action.value] if action is UFWAction.Delete else ["ufw"]
     command.extend(
-        ["allow", "out", "on", route.interface, "to", f"{route.destination.address}/{route.destination.mask}"]
+        [
+            "allow",
+            "out",
+            "on",
+            route.interface,
+            "to",
+            f"{route.destination.address}/{route.destination.mask}",
+        ]
     )
     if comment is not None:
         command.extend(["comment", comment])
@@ -223,7 +258,7 @@ def parse_address_line(line: str) -> Address:
     return Address(parts[0], options)
 
 
-def read_address_file(path: str, encoding: str = ADDRESS_FILE_ENCODING) -> T.Set[Address]:
+def read_address_file(path: str, encoding: str = ADDRESS_FILE_ENCODING) -> set[Address]:
     addresses = set()
     with open(path, "r", encoding=encoding) as file:
         for line in file:
@@ -240,8 +275,35 @@ def read_address_file(path: str, encoding: str = ADDRESS_FILE_ENCODING) -> T.Set
 stderr = functools.partial(print, file=sys.stderr)
 
 
+def run_daemon(arguments: argparse.Namespace) -> T.NoReturn:
+    argument_parser = get_argument_parser()
+    on_arguments = argument_parser.parse_args(["--file", VPN_WHITELIST_CONF_PATH, "--ufw"])
+    off_arguments = argument_parser.parse_args(["--file", VPN_WHITELIST_CONF_PATH, "--ufw", "--remove"])
+    vpn_was_up = None
+
+    while True:
+        interfaces = psutil.net_if_stats()
+        vpn_is_up = any(n.startswith(("tun", "tap")) for n in interfaces)
+        if vpn_was_up is None:
+            vpn_was_up = vpn_is_up
+
+        vpn_turned_on = not vpn_was_up and vpn_is_up
+        vpn_turned_off = vpn_was_up and not vpn_is_up
+
+        if vpn_turned_on:
+            run(on_arguments)
+        elif vpn_turned_off:
+            run(off_arguments)
+
+        vpn_was_up = vpn_is_up
+        time.sleep(arguments.interval)
+
+
 # noinspection PyShadowingNames
-def main(arguments: argparse.Namespace) -> ExitCode:
+def run(arguments: argparse.Namespace) -> ExitCode:
+    if arguments.daemon:
+        run_daemon(arguments)
+
     gateway = arguments.gateway
     interface = arguments.interface
 
@@ -295,7 +357,11 @@ def main(arguments: argparse.Namespace) -> ExitCode:
     return ExitCode.Success
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = get_argument_parser()
     arguments = parser.parse_args()
-    parser.exit(main(arguments))
+    parser.exit(run(arguments))
+
+
+if __name__ == "__main__":
+    main()

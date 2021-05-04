@@ -1,5 +1,21 @@
 #!/usr/bin/env python
 
+# Copyright (C) 2021 cryzed
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 import argparse
 import collections
 import dataclasses
@@ -32,7 +48,7 @@ DNS_RESOURCE_RECORD_STRUCT_FORMAT = "!HHiH"
 DNS_RESOURCE_RECORD_STRUCT_SIZE = struct.calcsize(DNS_RESOURCE_RECORD_STRUCT_FORMAT)
 DNS_A_RECORD_STRUCT_FORMAT = "!BBBB"
 
-whitelisted: T.Set[str] = set()
+whitelisted: set[str] = set()
 
 
 def get_argument_parser() -> argparse.ArgumentParser:
@@ -50,9 +66,7 @@ def get_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-H", "--host", default="localhost", help="Address to bind to")
     parser.add_argument("-p", "--port", type=int, default=53, help="Port to listen on")
-    parser.add_argument(
-        "-P", "--remote-port", type=int, default=53, help="Remote DNS port"
-    )
+    parser.add_argument("-P", "--remote-port", type=int, default=53, help="Remote DNS port")
     parser.add_argument(
         "-k",
         "--keep",
@@ -100,29 +114,26 @@ RecordType = T.Union[DNSQuestionRecord, DNSResourceRecord]
 @dataclasses.dataclass
 class DNSMessage:
     header: DNSHeader
-    question_records: T.List[DNSQuestionRecord]
-    answer_records: T.List[DNSResourceRecord]
-    authority_records: T.List[DNSResourceRecord]
-    additional_records: T.List[DNSResourceRecord]
+    question_records: list[DNSQuestionRecord]
+    answer_records: list[DNSResourceRecord]
+    authority_records: list[DNSResourceRecord]
+    additional_records: list[DNSResourceRecord]
 
 
-def parse_dns_header(data: bytes) -> T.Tuple[DNSHeader, int]:
+def parse_dns_header(data: bytes) -> tuple[DNSHeader, int]:
     header = DNSHeader(*struct.unpack_from(DNS_HEADER_STRUCT_FORMAT, data))
     return header, DNS_HEADER_SIZE
 
 
 @functools.lru_cache
-def parse_dns_name_notation(data: bytes, offset: int = 0) -> T.Tuple[T.Union[str], int]:
+def parse_dns_name_notation(data: bytes, offset: int = 0) -> tuple[str, int]:
     labels = []
 
     while True:
         label_size = struct.unpack_from(DNS_LABEL_SIZE_STRUCT_FORMAT, data, offset)[0]
         is_pointer = label_size >= 192
         if is_pointer:
-            pointer = (
-                struct.unpack_from(DNS_LABEL_POINTER_STRUCT_FORMAT, data, offset)[0]
-                & DNS_LABEL_POINTER_MASK
-            )
+            pointer = struct.unpack_from(DNS_LABEL_POINTER_STRUCT_FORMAT, data, offset)[0] & DNS_LABEL_POINTER_MASK
             offset += DNS_LABEL_POINTER_SIZE
             label = parse_dns_name_notation(data, pointer)[0]
             labels.append(label)
@@ -143,21 +154,15 @@ def parse_dns_name_notation(data: bytes, offset: int = 0) -> T.Tuple[T.Union[str
     return ".".join(labels), offset
 
 
-def parse_dns_question_record(
-    data: bytes, offset: int = 0
-) -> T.Tuple[DNSQuestionRecord, int]:
+def parse_dns_question_record(data: bytes, offset: int = 0) -> tuple[DNSQuestionRecord, int]:
     name, offset = parse_dns_name_notation(data, offset)
     type_, class_ = struct.unpack_from(DNS_QUESTION_RECORD_STRUCT_FORMAT, data, offset)
     return DNSQuestionRecord(name, type_, class_), offset + DNS_QUESTION_RECORD_SIZE
 
 
-def parse_dns_resource_record(
-    data: bytes, offset: int = 0
-) -> T.Tuple[DNSResourceRecord, int]:
+def parse_dns_resource_record(data: bytes, offset: int = 0) -> tuple[DNSResourceRecord, int]:
     name, offset = parse_dns_name_notation(data, offset)
-    type_, class_, ttl, rdlength = struct.unpack_from(
-        DNS_RESOURCE_RECORD_STRUCT_FORMAT, data, offset
-    )
+    type_, class_, ttl, rdlength = struct.unpack_from(DNS_RESOURCE_RECORD_STRUCT_FORMAT, data, offset)
     rdata_format = f"!{rdlength}s"
     offset += DNS_RESOURCE_RECORD_STRUCT_SIZE
     rdata = struct.unpack_from(rdata_format, data, offset)[0]
@@ -169,9 +174,7 @@ def parse_dns_resource_record(
     )
 
 
-def parse_dns_question_records(
-    data: bytes, count: int, offset: int = 0
-) -> T.Tuple[T.List[DNSQuestionRecord], int]:
+def parse_dns_question_records(data: bytes, count: int, offset: int = 0) -> tuple[list[DNSQuestionRecord], int]:
     questions = []
     for _ in range(count):
         record, offset = parse_dns_question_record(data, offset)
@@ -179,9 +182,7 @@ def parse_dns_question_records(
     return questions, offset
 
 
-def parse_dns_resource_records(
-    data: bytes, count: int, offset: int = 0
-) -> T.Tuple[T.List[DNSResourceRecord], int]:
+def parse_dns_resource_records(data: bytes, count: int, offset: int = 0) -> tuple[list[DNSResourceRecord], int]:
     records = []
     for _ in range(count):
         record, offset = parse_dns_resource_record(data, offset)
@@ -207,7 +208,7 @@ def get_dns_a_record_data(record: DNSResourceRecord) -> str:
 
 
 # noinspection PyShadowingNames
-def vpn_whitelist(addresses: T.List[str], arguments: T.List[str]) -> None:
+def vpn_whitelist(addresses: list[str], arguments: list[str]) -> None:
     command = ["vpn-whitelist", *addresses, *arguments]
     print(" ".join(command))
     subprocess.run(command)
@@ -219,9 +220,9 @@ stderr = functools.partial(print, file=sys.stderr)
 class DNSProxyHandler(socketserver.BaseRequestHandler):
     def __init__(
         self,
-        remote_address: T.Tuple[str, int],
-        regexes: T.List[T.Pattern[str]],
-        vpn_whitelist_arguments: T.List[str],
+        remote_address: tuple[str, int],
+        regexes: list[T.Pattern[str]],
+        vpn_whitelist_arguments: list[str],
         *args: T.Any,
         **kwargs: T.Any,
     ):
@@ -258,9 +259,7 @@ class DNSProxyHandler(socketserver.BaseRequestHandler):
             # noinspection PyShadowingNames
             arguments = self.vpn_whitelist_arguments.copy()
             time_string = datetime.now().isoformat(sep=" ", timespec="seconds")
-            arguments.extend(
-                ["--comment", f"Whitelist DNS Proxy {name} ({time_string})"]
-            )
+            arguments.extend(["--comment", f"Whitelist DNS Proxy {name} ({time_string})"])
 
             vpn_whitelist(sorted(not_whitelisted), arguments)
             whitelisted.update(not_whitelisted)
@@ -269,28 +268,22 @@ class DNSProxyHandler(socketserver.BaseRequestHandler):
 
 
 def get_dns_proxy_handler_factory(
-    remote_address: T.Tuple[str, int],
-    regexes: T.List[T.Pattern[str]],
-    vpn_whitelist_arguments: T.List[str],
+    remote_address: tuple[str, int],
+    regexes: list[T.Pattern[str]],
+    vpn_whitelist_arguments: list[str],
 ) -> T.Callable[..., DNSProxyHandler]:
     def factory(*args: T.Any, **kwargs: T.Any) -> DNSProxyHandler:
-        return DNSProxyHandler(
-            remote_address, regexes, vpn_whitelist_arguments, *args, **kwargs
-        )
+        return DNSProxyHandler(remote_address, regexes, vpn_whitelist_arguments, *args, **kwargs)
 
     return factory
 
 
 # noinspection PyShadowingNames
-def main(
-    arguments: argparse.Namespace, vpn_whitelist_arguments: T.List[str]
-) -> ExitCode:
+def run(arguments: argparse.Namespace, vpn_whitelist_arguments: list[str]) -> ExitCode:
     local_address = arguments.host, arguments.port
     remote_address = arguments.remote_host, arguments.remote_port
     regexes = [re.compile(regex, re.IGNORECASE) for regex in arguments.regexes]
-    factory = get_dns_proxy_handler_factory(
-        remote_address, regexes, vpn_whitelist_arguments
-    )
+    factory = get_dns_proxy_handler_factory(remote_address, regexes, vpn_whitelist_arguments)
 
     with socketserver.ThreadingUDPServer(local_address, factory) as server:
         try:
@@ -306,7 +299,11 @@ def main(
     return ExitCode.Success
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = get_argument_parser()
     arguments, rest = parser.parse_known_args()
-    parser.exit(main(arguments, rest))
+    parser.exit(run(arguments, rest))
+
+
+if __name__ == "__main__":
+    main()

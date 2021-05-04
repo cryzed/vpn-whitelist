@@ -1,0 +1,10 @@
+[Unit]
+Description=VPN-Whitelist Daemon
+
+[Service]
+ExecStart=vpn-whitelist --daemon --interval 1.0
+Type=simple
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
